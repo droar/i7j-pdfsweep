@@ -22,20 +22,6 @@
  */
 package com.itextpdf.pdfcleanup.util;
 
-import com.itextpdf.kernel.geom.Rectangle;
-import org.apache.commons.imaging.ImageFormat;
-import org.apache.commons.imaging.ImageFormats;
-import org.apache.commons.imaging.ImageInfo;
-import org.apache.commons.imaging.ImageReadException;
-import org.apache.commons.imaging.ImageWriteException;
-import org.apache.commons.imaging.Imaging;
-import org.apache.commons.imaging.formats.png.PngConstants;
-
-import javax.imageio.IIOImage;
-import javax.imageio.ImageIO;
-import javax.imageio.ImageWriteParam;
-import javax.imageio.ImageWriter;
-import javax.imageio.stream.MemoryCacheImageOutputStream;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
@@ -45,7 +31,20 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.MemoryCacheImageOutputStream;
+import org.apache.commons.imaging.ImageFormat;
+import org.apache.commons.imaging.ImageFormats;
+import org.apache.commons.imaging.ImageInfo;
+import org.apache.commons.imaging.ImageReadException;
+import org.apache.commons.imaging.ImageWriteException;
+import org.apache.commons.imaging.Imaging;
+import org.apache.commons.imaging.formats.png.PngConstants;
+import com.itextpdf.kernel.geom.Rectangle;
+import com.itextpdf.kernel.pdf.xobject.PdfImageXObject;
 /**
  * Utility class providing methods to handle images and work with graphics.
  */
@@ -62,18 +61,33 @@ public final class CleanUpImageUtil {
      * @param areasToBeCleaned the List of Rectangles that need to be redacted out of the image
      * @return an array of bytes of the image with cleaned areas.
      */
-    public static byte[] cleanUpImage(byte[] imageBytes, List<Rectangle> areasToBeCleaned) {
+    public static byte[] cleanUpImage(PdfImageXObject pdfImage, List<Rectangle> areasToBeCleaned) {
         if (areasToBeCleaned.isEmpty()) {
-            return imageBytes;
+            return pdfImage.getImageBytes();
         }
 
         try {
-            final ImageInfo imageInfo = Imaging.getImageInfo(imageBytes);
-            BufferedImage image = getBuffer(imageBytes, imageInfo.getFormat());
-            cleanImage(image, areasToBeCleaned);
-            return writeImage(image, imageInfo);
+            final ImageFormat format = Imaging.guessFormat(pdfImage.getImageBytes());
+            byte[] wroteBytes = null;
+            
+            // If we have a unknown image we will threat it as it
+            if (format == ImageFormats.UNKNOWN) {
+              BufferedImage image = ImageIO.read(new ByteArrayInputStream(pdfImage.getImageBytes()));
+              
+              // Unknown format sometimes gives null readers, we have to control it
+              if (image != null) {
+                cleanImage(image, areasToBeCleaned);
+                wroteBytes = Imaging.writeImageToBytes(image, ImageFormats.PNG, null);
+              } 
+            } else {
+              final ImageInfo imageInfo = Imaging.getImageInfo(pdfImage.getImageBytes());
+              BufferedImage image = getBuffer(pdfImage.getImageBytes(), imageInfo.getFormat());
+              cleanImage(image, areasToBeCleaned);
+              wroteBytes = writeImage(image, imageInfo);
+            }
+            return wroteBytes;
         } catch (ImageReadException | ImageWriteException | IOException e) {
-            throw new CleanupImageHandlingUtilException(e.getMessage(), e);
+          throw new CleanupImageHandlingUtilException(e.getMessage(), e);
         }
     }
 
@@ -140,7 +154,7 @@ public final class CleanUpImageUtil {
             return Imaging.writeImageToBytes(imageToWrite, originalImageInfo.getFormat(), params);
         }
     }
-
+    
     /**
      * Get the bytes of the BufferedImage (in JPG format).
      *
